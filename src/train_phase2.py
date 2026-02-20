@@ -14,7 +14,8 @@ warnings.filterwarnings('ignore')
 def extract_features(data_dir, model_checkpoint, device='cuda'):
     """ Extract 128-D CNN features + Handcrafted features for the dataset. """
     print("Extracting features using fine-tuned HyperKon...")
-    model = HyperKon(num_features=4).to(device)
+    # Updated to expected parameter size
+    model = HyperKon(num_features=6).to(device)
     model.load_state_dict(torch.load(model_checkpoint, map_location=device))
     model.eval()
 

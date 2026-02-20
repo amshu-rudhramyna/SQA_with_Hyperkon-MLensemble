@@ -24,8 +24,8 @@ def train_hyperkon_phase1(data_dir, epochs=100, batch_size=24, lr=1e-3, min_lr=1
     print("Initializing Phase 1: CNN Fine-Tuning...")
     
     # Needs to be updated depending on actual target dimensions
-    # Assuming 4 targets: P, K, Mg, pH (from summary)
-    num_targets = 4
+    # Actual dataset uses 6 targets: B, Cu, Zn, Fe, S, Mn
+    num_targets = 6
     model = HyperKon(num_features=num_targets).to(device)
     
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-4)

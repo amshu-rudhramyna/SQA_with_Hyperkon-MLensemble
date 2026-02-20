@@ -38,7 +38,7 @@ class EnsembleModel:
             ))
         ])
 
-    def fit_xgb(self, X_train, y_train, X_val, y_val, target_names=['P', 'K', 'Mg', 'pH']):
+    def fit_xgb(self, X_train, y_train, X_val, y_val, target_names=['B', 'Cu', 'Zn', 'Fe', 'S', 'Mn']):
         # XGBoost handles early stopping via eval_set
         print("Training XGBoost...")
         self.xgb_model.fit(
