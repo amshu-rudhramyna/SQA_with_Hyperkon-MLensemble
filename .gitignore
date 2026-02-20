@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# PyTorch
+*.pth
+*.pt
+checkpoints/
+
+# Virtual environments
+venv/
+env/
+.env
+
+# Data
+data/
+data/raw/
+data/processed/
+*.csv
+*.npz
+*.tiff
+*.tif
+*.npy
+
+# OS
+.DS_Store
+Thumbs.db
