@@ -11,14 +11,26 @@ from src.data.loader import HyperviewDataset
 from torch.utils.data import DataLoader
 
 class MultiTaskLoss(nn.Module):
-    def __init__(self, l1_weight=0.1):
+    def __init__(self, l1_weight=0.1, prop_weights=None, device='cuda'):
         super(MultiTaskLoss, self).__init__()
         self.l1_weight = l1_weight
-        self.mse = nn.MSELoss()
-        self.l1 = nn.L1Loss()
+        self.l1 = nn.L1Loss(reduction='none') # Don't mean yet to apply weights
+        self.device = device
+        
+        # B: 1.5, Cu: 1.2, Zn: 1.2, Fe: 1.0, S: 1.2, Mn: 1.0
+        if prop_weights is None:
+            self.prop_weights = torch.tensor([1.5, 1.2, 1.2, 1.0, 1.2, 1.0], dtype=torch.float32).to(device)
+        else:
+            self.prop_weights = torch.tensor(prop_weights, dtype=torch.float32).to(device)
 
     def forward(self, preds, targets):
-        return self.mse(preds, targets) + self.l1_weight * self.l1(preds, targets)
+        mse = (preds - targets) ** 2
+        weighted_mse = mse * self.prop_weights
+        
+        l1 = torch.abs(preds - targets)
+        weighted_l1 = l1 * self.prop_weights
+        
+        return weighted_mse.mean() + self.l1_weight * weighted_l1.mean()
 
 def train_hyperkon_phase1(data_dir, epochs=100, batch_size=24, lr=1e-3, min_lr=1e-6, device='cuda'):
     print("Initializing Phase 1: CNN Fine-Tuning...")

@@ -58,7 +58,9 @@ def optimize_ensemble_weights(preds_xgb, preds_rf, preds_knn, y_true):
         mse = np.mean((y_true - y_pred)**2)
         return mse
 
-    res = minimize(loss_func, x0=[0.33, 0.33, 0.33], bounds=[(0, 1), (0, 1), (0, 1)], method='L-BFGS-B')
+    # Set bounds to heavily favor XGBoost (w1 -> XGBoost >= 0.4) 
+    # and restrict others according to paper findings.
+    res = minimize(loss_func, x0=[0.6, 0.2, 0.2], bounds=[(0.4, 1.0), (0.0, 0.6), (0.0, 0.6)], method='L-BFGS-B')
     weights = res.x / np.sum(res.x)
     return weights
 
