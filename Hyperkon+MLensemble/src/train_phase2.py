@@ -1,5 +1,10 @@
+import os
+import sys
 import torch
 import numpy as np
+
+# Ensure the root directory is in the python path to find 'src'
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from sklearn.model_selection import KFold
 import warnings
 from scipy.optimize import minimize # Alternative to Bayesian Opt for simple weight blending
@@ -11,7 +16,7 @@ from src.data.loader import HyperviewDataset
 
 warnings.filterwarnings('ignore')
 
-def extract_features(data_dir, model_checkpoint, device='cuda'):
+def extract_features(data_dir, model_checkpoint, device='cuda' if torch.cuda.is_available() else 'cpu'):
     """ Extract 128-D CNN features + Handcrafted features for the dataset. """
     print("Extracting features using fine-tuned HyperKon...")
     # Updated to expected parameter size
@@ -113,5 +118,4 @@ def train_phase2(data_dir, hyperkon_ckpt):
     return property_weights
 
 if __name__ == "__main__":
-    # train_phase2('data/raw/HYPERVIEW2/train', 'checkpoints/hyperkon_phase1.pth')
-    pass
+    train_phase2('../data/raw/HYPERVIEW2/train', 'checkpoints/hyperkon_phase1.pth')

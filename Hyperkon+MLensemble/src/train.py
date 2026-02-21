@@ -1,5 +1,10 @@
+import os
+import sys
 import torch
 import torch.nn as nn
+
+# Ensure the root directory is in the python path to find 'src'
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.nn.functional as F
@@ -42,7 +47,7 @@ def train_hyperkon_phase1(data_dir, epochs=100, batch_size=24, lr=1e-3, min_lr=1
     
     optimizer = AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = CosineAnnealingLR(optimizer, T_max=epochs, eta_min=min_lr)
-    criterion = MultiTaskLoss()
+    criterion = MultiTaskLoss(device=device)
 
     dataset = HyperviewDataset(data_dir)
     # Using small dataloader workers for windows
@@ -86,6 +91,5 @@ def train_hyperkon_phase1(data_dir, epochs=100, batch_size=24, lr=1e-3, min_lr=1
 
 if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    # Wait until dataset is downloaded properly
-    # train_hyperkon_phase1(data_dir='data/raw/HYPERVIEW2/train', device=device)
+    train_hyperkon_phase1(data_dir='../data/raw/HYPERVIEW2/train', device=device)
     print(f"Trainer ready using device: {device}")
