@@ -25,6 +25,13 @@ Despite operating on fractions of the compute epochs to map trace signals entire
 
 These strong >0.6 R² metrics against ultra-fine element traces conclusively proves the Squeeze-and-Excitation spectral attention bottlenecks function perfectly at identifying targeted bandwidths, verifying the hybrid prediction system as highly resilient out-of-the-box.
 
+## Dataset: HYPERVIEW2
+The model is trained and evaluated using the **HYPERVIEW2** hyperspectral dataset.
+* **Source:** Downloadable via the `eotdl` platform (`eotdl dataset get HYPERVIEW2` or `https://www.eotdl.com/datasets/HYPERVIEW2`).
+* **Format:** Comprises individual `.npz` arrays containing hyperspectral patches.
+* **Dimensions:** 150 contiguous spectral bands covering the 462–938 nm range.
+* **Targets:** This implementation maps latent soil trace elements: Boron (B), Copper (Cu), Zinc (Zn), Iron (Fe), Sulphur (S), and Manganese (Mn), provided in the `train_gt.csv` ground truth file.
+
 ## Project Structure
 The model is isolated into its own reusable `Hyperkon+MLensemble` module to keep the repository Root agnostic. This is designed so you can seamlessly test and benchmark entirely different architectural frameworks using the same dataset backend.
 ```text
@@ -34,6 +41,4 @@ The model is isolated into its own reusable `Hyperkon+MLensemble` module to keep
   /src/train_phase2.py    # Phase 2: Ensemble Weight CV Optimization
   evaluate.py             # Feature Extraction & Pipeline Validation
 ```
-1. Download dataset into `/data/raw/`
-2. Change context `cd Hyperkon+MLensemble`
-3. Launch `python src/train.py`
+
