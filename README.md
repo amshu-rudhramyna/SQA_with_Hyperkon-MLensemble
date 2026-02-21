@@ -61,15 +61,40 @@ These metrics prove the `HyperKon` architecture successfully extracts critical n
 
 ---
 
+## Architecture 2: Property-Specific Ensemble (Micronutrient Focus)
+
+Building upon the base model, a second decoupled architecture (`PropertySpecificEnsemble/`) was developed specifically to address the low-concentration, latent nature of trace elements like Boron, Copper, and Zinc. Because micronutrients lack the dominant spectral absorption features of macronutrients, this model fundamentally changes the analytical approach:
+
+### Key Methodological Differences
+**1. Advanced Feature Engineering (Tier 1):**
+Unlike the baseline model which relies largely on CNN embeddings, this architecture natively transforms the spectrum into **1st/2nd Derivatives**, **SVD Eigen-spectra** components, and **Discrete Wavelet Transforms (DWT)** (using the Meyer wavelet to explicitly denoise Boron signals).
+
+**2. Mixed-Precision & Multi-Task Loss (Tier 2):**
+The `HyperKon` backbone is optimized using Automatic Mixed Precision (`torch.float16`) to scale GPU memory over hyperspectral bands. A localized **Multi-Task Learning (MTL) Loss** heavily biases the network to penalize errors in the hardest-to-predict trace metals (Boron ratio=3.0, Copper ratio=2.5) over easier physical targets like Iron (ratio=1.0).
+
+**3. Decoupled, Target-Specific Regressors (Tier 3):**
+The unified model passed all embeddings statically to a general XGBoost/RF/KNN ensemble. In contrast, the Property-Specific architecture actively routes targets based on geochemical associations:
+* **Fe & Mn:** Rely heavily (60%) on the CNN latent shapes, as Iron exhibits strong physical absorption spectra. Mapped primarily via Random Forest clustering.
+* **B, Cu, Zn:** Shift reliance heavily (70%) onto XGBoost processing the engineered SVD/DWT features, as these metals have "indirect" signatures linked to organic matter, requiring intense non-linear spatial regression.
+
+#### Visual Outcomes (Property-Specific)
+By uncoupling the targets, the validation matrix cleanly isolates prediction targets, demonstrating independent optimization trajectories:
+
+**Property-Specific Correlation Matrix:**  
+![Property-Specific Correlation Matrix](PropertySpecificEnsemble/results/correlation_matrix.png)
+
+---
+
 ### Project Structure & Execution
 
 The primary model is fully isolated within its own module folder to preserve the agnostic nature of the shared `/data` root directory.
 ```text
-/data                     # Shared Dataset Root
-/Hyperkon+MLensemble      # Modular Architecture
-  /src/train.py           # Phase 1
-  /src/train_phase2.py    # Phase 2 
-  evaluate.py             # Feature Extraction & Plot Generator
+/data                       # Shared Dataset Root
+/Hyperkon+MLensemble        # Architecture 1: Unified Global Ensemble
+/PropertySpecificEnsemble   # Architecture 2: Decoupled Trace-Metal Ensemble
+  /src/train.py             # Phase 1 Encoder (AMP + MTL)
+  /src/train_phase2.py      # Phase 2 Decoupled Regressors
+  evaluate.py               # Feature Extraction & Matrix Plot Generator
 ```
 
 **Running the Pipeline:**
