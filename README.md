@@ -53,8 +53,8 @@ These metrics prove the `HyperKon` architecture successfully extracts critical n
 
 #### Visual Outcomes
 
-**Optimization Metrics (R² and RMSE):**  
-![Final Ensemble Performance Values](Hyperkon+MLensemble/results/performance_metrics.png)
+**Correlation Matrix of True vs Predicted Soil Properties:**  
+![Correlation Matrix of Predicted Soil Properties](Hyperkon+MLensemble/results/correlation_matrix.png)
 
 **Truth vs. Inference Correlation Embeddings:**  
 ![Scatter Plot Predictions vs Ground Truth](Hyperkon+MLensemble/results/predictions_vs_truth.png)
