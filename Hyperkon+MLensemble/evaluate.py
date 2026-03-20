@@ -68,13 +68,20 @@ def evaluate_model(data_dir, checkpoint_path):
     plt.savefig('results/predictions_vs_truth.png')
     print("Saved plot to results/predictions_vs_truth.png")
     
-    # Plot Metrics Bar Chart
-    plt.figure(figsize=(10, 5))
-    sns.barplot(data=metrics_df.melt(id_vars='Property', var_name='Metric', value_name='Value'),
-                x='Property', y='Value', hue='Metric')
-    plt.title('Final Model Performance (R² and RMSE)')
-    plt.savefig('results/performance_metrics.png')
-    print("Saved plot to results/performance_metrics.png")
+    # Plot Correlation Matrix
+    plt.figure(figsize=(8, 6))
+    corr_matrix = pd.DataFrame(preds, columns=target_names).corr()
+    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', vmin=-1, vmax=1, fmt=".2f", linewidths=0.5)
+    plt.title('Correlation Matrix of Predicted Soil Properties')
+    plt.tight_layout()
+    plt.savefig('results/correlation_matrix.png')
+    print("Saved plot to results/correlation_matrix.png")
     
 if __name__ == "__main__":
-    evaluate_model('../data/raw/HYPERVIEW2/train', 'checkpoints/hyperkon_phase1.pth')
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(root_dir, 'data', 'raw', 'HYPERVIEW2', 'train')
+    
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    hyperkon_path = os.path.join(module_dir, 'checkpoints', 'hyperkon_phase1.pth')
+    
+    evaluate_model(data_dir, hyperkon_path)

@@ -91,5 +91,9 @@ def train_hyperkon_phase1(data_dir, epochs=100, batch_size=24, lr=1e-3, min_lr=1
 
 if __name__ == "__main__":
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    train_hyperkon_phase1(data_dir='../data/raw/HYPERVIEW2/train', device=device)
+    
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    data_dir = os.path.join(root_dir, 'data', 'raw', 'HYPERVIEW2', 'train')
+    
+    train_hyperkon_phase1(data_dir=data_dir, device=device)
     print(f"Trainer ready using device: {device}")

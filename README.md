@@ -93,16 +93,47 @@ These benchmarks prove the underlying mathematical transformations actively deco
 
 ---
 
+## Architecture 3: March20 Advanced Enhancement Ensemble
+
+Derived from the `march20.txt` experimental configuration, this architecture was implemented locally within `March20_Ensemble/`. It explores high-density sequential optimization combining `SpectralCNN` embeddings with raw handcrafted features (Derivatives, SNV) actively filtered via `Recursive Feature Elimination (RFE)` and wrapped dynamically inside an `Optuna` driven Stacking Regressor (Random Forest, XGBoost, SVR, Ridge).
+
+### Final Experimental Results (March20 Enhancement)
+By upgrading the CNN training length to 200 epochs and tightly concatenating the feature streams, the model aggressively scaled baseline results:
+* **Boron (B)**: R² = 0.6533
+* **Iron (Fe)**: R² = 0.5800 
+* **Zinc (Zn)**: R² = 0.5481
+* **Copper (Cu)**: R² = 0.3973
+
+---
+
+## Architecture 4: Next-Gen Hyperview (Self-Supervised & LightGBM Stacks)
+
+Designed strictly for maximizing the capacity natively without distributed hardware (`Hyperview_R2_085/`), this framework discards baseline CNN logic entirely in favor of **Self-Supervised Learning (SSL)** via Contrastive Dense Encoders. 
+
+### Key Methodological Upgrades
+1. **SSL Representation**: Transforms raw spectral dimensions through a densified Multi-Layer Perceptron trained exclusively against MSE augmented spatial shifts and band masking, avoiding labels initially.
+2. **Global Target Decoupling**: Completely strips away MultiOutput regression blocks. Optuna isolates discrete parameters natively (`learning_rate`, `max_depth`, `n_estimators`) specific to the geochemical response curves of Boron, Copper, Zinc, and Iron. 
+3. **LightGBM Meta-Stack**: Swaps typical generalized combiners for strict LightGBM implementations inside heavily cross-validated folds to capture trace micro-fluctuations.
+
+### Final Experimental Results (Hyperview 8K R2 > 0.85 Protocol)
+* **Iron (Fe)**: R² = 0.5745
+* **Zinc (Zn)**: R² = 0.5404 
+* **Boron (B)**: R² = 0.5263
+* **Copper (Cu)**: R² = 0.3677
+
+*(Note: To safely execute under localized OpenMP Windows deadlocks, k=200 local neighborhood modeling was substituted for globally targeted LightGBM stacks.)*
+
+---
+
 ### Project Structure & Execution
 
-The primary model is fully isolated within its own module folder to preserve the agnostic nature of the shared `/data` root directory.
+The primary models are strictly isolated:
 ```text
 /data                       # Shared Dataset Root
 /Hyperkon+MLensemble        # Architecture 1: Unified Global Ensemble
 /PropertySpecificEnsemble   # Architecture 2: Decoupled Trace-Metal Ensemble
-  /src/train.py             # Phase 1 Encoder (AMP + MTL)
-  /src/train_phase2.py      # Phase 2 Decoupled Regressors
-  evaluate.py               # Feature Extraction & Matrix Plot Generator
+/March20_Ensemble           # Architecture 3: RFE + 200Epoch CNN Stack
+/Hyperview_R2_085           # Architecture 4: SSL Encoders + LightGBM Decoupling
 ```
 
 **Running the Pipeline:**

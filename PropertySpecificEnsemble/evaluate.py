@@ -78,5 +78,11 @@ def evaluate_property_specific_model(data_dir, checkpoint_path):
     print("Saved decoupled model correlation matrix to results/correlation_matrix.png")
     
 if __name__ == "__main__":
-    hyperkon_path = 'checkpoints/hyperkon_phase1_trace.pth'
-    evaluate_property_specific_model('../data/raw/HYPERVIEW2/train', hyperkon_path)
+    # Ensure paths resolve absolutely regardless of which directory the command is fired from
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(root_dir, 'data', 'raw', 'HYPERVIEW2', 'train')
+    
+    module_dir = os.path.dirname(os.path.abspath(__file__))
+    hyperkon_path = os.path.join(module_dir, 'checkpoints', 'hyperkon_phase1_trace.pth')
+    
+    evaluate_property_specific_model(data_dir, hyperkon_path)

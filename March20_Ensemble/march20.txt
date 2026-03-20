@@ -1,0 +1,247 @@
+You are an expert ML engineer and hyperspectral data scientist.
+
+Your task is to build a HIGH-PERFORMANCE soil property prediction pipeline using the Hyperview 8K NPZ dataset.
+
+The goal is to OUTPERFORM baseline ensemble models (RandomForest/KNN) by applying:
+- advanced spectral preprocessing
+- feature engineering
+- deep learning feature extraction
+- stacking ensemble learning
+- hyperparameter optimization
+
+Follow ALL steps strictly.
+
+------------------------------------------------------------
+SECTION 1 — DATA LOADING
+------------------------------------------------------------
+
+Load NPZ dataset with structure:
+- X → (n_samples, n_bands)
+- y → (n_samples, 4 targets)
+
+Python:
+
+import numpy as np
+
+def load_data(path):
+    data = np.load(path)
+    X = data['X']
+    y = data['y']
+    return X, y
+
+------------------------------------------------------------
+SECTION 2 — PREPROCESSING
+------------------------------------------------------------
+
+Apply Savitzky-Golay smoothing:
+
+from scipy.signal import savgol_filter
+
+def smooth(X):
+    return savgol_filter(X, window_length=11, polyorder=2, axis=1)
+
+------------------------------------------------------------
+SECTION 3 — FEATURE ENGINEERING
+------------------------------------------------------------
+
+1. Add spectral derivatives:
+
+import numpy as np
+
+def spectral_derivatives(X):
+    d1 = np.gradient(X, axis=1)
+    d2 = np.gradient(d1, axis=1)
+    return np.concatenate([X, d1, d2], axis=1)
+
+2. Optional: Normalize features
+
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+X = scaler.fit_transform(X)
+
+------------------------------------------------------------
+SECTION 4 — FEATURE SELECTION (CRITICAL)
+------------------------------------------------------------
+
+Use RFE with RandomForest:
+
+from sklearn.feature_selection import RFE
+from sklearn.ensemble import RandomForestRegressor
+
+def select_features(X, y):
+    selector = RFE(RandomForestRegressor(n_estimators=200), n_features_to_select=60)
+    return selector.fit_transform(X, y[:,0])
+
+------------------------------------------------------------
+SECTION 5 — DATA AUGMENTATION
+------------------------------------------------------------
+
+Add spectral noise:
+
+def augment(X):
+    noise = np.random.normal(0, 0.01, X.shape)
+    return X + noise
+
+------------------------------------------------------------
+SECTION 6 — DEEP FEATURE EXTRACTION (CNN)
+------------------------------------------------------------
+
+Use PyTorch:
+
+import torch
+import torch.nn as nn
+
+class SpectralCNN(nn.Module):
+    def __init__(self, input_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv1d(1, 32, kernel_size=5),
+            nn.ReLU(),
+            nn.Conv1d(32, 64, kernel_size=5),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten()
+        )
+
+    def forward(self, x):
+        x = x.unsqueeze(1)
+        return self.net(x)
+
+------------------------------------------------------------
+SECTION 7 — EXTRACT CNN FEATURES
+------------------------------------------------------------
+
+def extract_features(model, X):
+    model.eval()
+    with torch.no_grad():
+        X_tensor = torch.tensor(X, dtype=torch.float32)
+        features = model(X_tensor).numpy()
+    return features
+
+------------------------------------------------------------
+SECTION 8 — STACKING ENSEMBLE (CORE MODEL)
+------------------------------------------------------------
+
+from sklearn.ensemble import StackingRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.svm import SVR
+from sklearn.linear_model import Ridge
+from xgboost import XGBRegressor
+
+estimators = [
+    ('rf', RandomForestRegressor(n_estimators=300)),
+    ('svr', SVR()),
+    ('xgb', XGBRegressor(n_estimators=300))
+]
+
+stack_model = StackingRegressor(
+    estimators=estimators,
+    final_estimator=Ridge()
+)
+
+------------------------------------------------------------
+SECTION 9 — MULTI OUTPUT MODEL
+------------------------------------------------------------
+
+from sklearn.multioutput import MultiOutputRegressor
+
+model = MultiOutputRegressor(stack_model)
+
+------------------------------------------------------------
+SECTION 10 — TRAINING PIPELINE
+------------------------------------------------------------
+
+1. Load data
+2. Smooth
+3. Add derivatives
+4. Normalize
+5. Feature selection
+6. Augment (optional)
+7. Train CNN
+8. Extract CNN features
+9. Train stacking model
+
+Example:
+
+X, y = load_data("train.npz")
+
+X = smooth(X)
+X = spectral_derivatives(X)
+X = scaler.fit_transform(X)
+X = select_features(X, y)
+
+X_aug = augment(X)
+
+cnn = SpectralCNN(X.shape[1])
+
+features = extract_features(cnn, X)
+
+model.fit(features, y)
+
+------------------------------------------------------------
+SECTION 11 — HYPERPARAMETER OPTIMIZATION
+------------------------------------------------------------
+
+Use Optuna:
+
+import optuna
+
+def objective(trial):
+    n_estimators = trial.suggest_int("n_estimators", 100, 500)
+    max_depth = trial.suggest_int("max_depth", 5, 30)
+
+    model = RandomForestRegressor(
+        n_estimators=n_estimators,
+        max_depth=max_depth
+    )
+
+    model.fit(X_train, y_train)
+    return model.score(X_val, y_val)
+
+study = optuna.create_study(direction="maximize")
+study.optimize(objective, n_trials=50)
+
+------------------------------------------------------------
+SECTION 12 — EVALUATION
+------------------------------------------------------------
+
+from sklearn.metrics import r2_score, mean_squared_error
+
+pred = model.predict(features_test)
+
+print("R2:", r2_score(y_test, pred))
+print("RMSE:", np.sqrt(mean_squared_error(y_test, pred)))
+
+------------------------------------------------------------
+SECTION 13 — CRITICAL IMPROVEMENTS (MANDATORY)
+------------------------------------------------------------
+
+- Use stacking instead of single models
+- Use spectral derivatives
+- Reduce bands (feature selection)
+- Use CNN embeddings (DO NOT skip)
+- Tune hyperparameters
+- Use data augmentation
+
+------------------------------------------------------------
+SECTION 14 — ADVANCED (OPTIONAL BUT HIGH IMPACT)
+------------------------------------------------------------
+
+- Replace CNN with Transformer encoder
+- Use LightGBM as meta learner
+- Use SHAP for feature importance
+- Add spatial features if available
+- Try self-supervised pretraining
+
+------------------------------------------------------------
+FINAL GOAL
+------------------------------------------------------------
+
+Produce a model that:
+- achieves higher R² than baseline RF/KNN ensemble
+- generalizes well on unseen test data
+- uses hybrid DL + ML approach
+
+DO NOT SIMPLIFY THE PIPELINE.
+FOLLOW ALL STEPS.

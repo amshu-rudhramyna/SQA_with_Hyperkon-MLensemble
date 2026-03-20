@@ -118,4 +118,10 @@ def train_phase2(data_dir, hyperkon_ckpt):
     return property_weights
 
 if __name__ == "__main__":
-    train_phase2('../data/raw/HYPERVIEW2/train', 'checkpoints/hyperkon_phase1.pth')
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    data_dir = os.path.join(root_dir, 'data', 'raw', 'HYPERVIEW2', 'train')
+    
+    module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hyperkon_path = os.path.join(module_dir, 'checkpoints', 'hyperkon_phase1.pth')
+    
+    train_phase2(data_dir, hyperkon_path)

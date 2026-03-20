@@ -111,13 +111,14 @@ def train_phase2(data_dir, hyperkon_ckpt):
                 final_val_pred = (0.5 * ml_pred) + (0.5 * cnn_pred_val)
                 
             # Score
-            r2 = r2_score(y_val, final_val_pred)
+            r2_blended = r2_score(y_val, final_val_pred)
             rmse = root_mean_squared_error(y_val, final_val_pred)
+            r2_pure_ml = r2_score(y_val, ml_pred)
             
-            target_metrics[target_name]['R2'].append(r2)
+            target_metrics[target_name]['R2'].append(r2_blended)
             target_metrics[target_name]['RMSE'].append(rmse)
             
-            print(f"  {target_name}: R2 = {r2:.4f} | RMSE = {rmse:.4f}")
+            print(f"  {target_name}: Blended R2 = {r2_blended:.4f} | ML-Only R2 = {r2_pure_ml:.4f} | RMSE = {rmse:.4f}")
             
     print("\n=== Phase 2 Cross-Validation Results ===")
     for t in targets:
@@ -126,5 +127,11 @@ def train_phase2(data_dir, hyperkon_ckpt):
         print(f"{t}: Final R2: {avg_r2:.4f} | Final RMSE: {avg_rmse:.4f}")
 
 if __name__ == "__main__":
-    hyperkon_path = 'checkpoints/hyperkon_phase1_trace.pth'
-    train_phase2('../data/raw/HYPERVIEW2/train', hyperkon_path)
+    # Ensure paths resolve absolutely regardless of which directory the command is fired from
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    data_dir = os.path.join(root_dir, 'data', 'raw', 'HYPERVIEW2', 'train')
+    
+    module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    hyperkon_path = os.path.join(module_dir, 'checkpoints', 'hyperkon_phase1_trace.pth')
+    
+    train_phase2(data_dir, hyperkon_path)
