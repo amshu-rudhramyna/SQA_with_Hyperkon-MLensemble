@@ -125,6 +125,30 @@ Designed strictly for maximizing the capacity natively without distributed hardw
 
 ---
 
+## Architecture 5: Feature-Driven Recovery & Local Ensemble (March 28)
+
+Designed to recover performance after deep-transformer bottlenecks, this architecture (`SoilSpectraNet/RecoveryPipeline/`) shifts the project from "Deep Model Dominance" to a **Hybrid Feature-Driven + Local Modeling** framework. It uses 1290-band spectral derivatives as the primary signal, supplemented by lightweight CNN features and locally-calibrated regressors.
+
+### Key Methodological Shifts
+1. **Physical Backbone Priority**: Reverted to raw spectral features processed via **SNV, MSC, and Savitzky-Golay**. Added 1st and 2nd derivatives to expand the feature space from 430 to 1290 bands, ensuring high spectral resolution.
+2. **Shallow CNN Extraction**: Replaced the deep 3D-CNN/Transformer with a **Shallow 1D-CNN** (3 layers). This extracts 64-dimensional learned features without over-parameterizing the small dataset, providing a stable "learned" signal.
+3. **Local Neighborhood Modeling (KNN)**: Implements **Step B3: Local Calibration**. For each inference point, the system identifies the Top 150 nearest spectral neighbors (via Cosine Similarity) and trains a dedicated, local LightGBM model. This captures geochemical variance that global models cannot isolate.
+4. **Target-Wise Band Selection**: Performed target-specific feature selection (SelectKBest) for B, Cu, Zn, and Fe to isolate element-specific SWIR/NIR response regions.
+
+### Final Experimental Results (Recovery Pipeline)
+The recovery successfully bypassed the transformer deadlock, yielding stable predictive power across all soil traces:
+* **Target B (Boron)**: **R² = 0.4650** (Recovered from <0.05)
+* **Target Fe (Iron)**: **R² = 0.3577** (Recovered from 0.17)
+* **Target Zn (Zinc)**: **R² = 0.2959** (Recovered from negative)
+* **Target Cu (Copper)**: **R² = 0.2045** (Recovered from negative)
+
+### Bottleneck Analysis & Lessons Learned
+* **Transformer Noise**: Large Transformers (SST) on 1,600-sample HSI cubes introduced excessive noise due to positional embedding complexity outstripping the label density. 
+* **Local vs Global**: The local neighborhood modeling consistently provided a **+0.15 R² jump** over global ensembles, proving that soil property estimation behaves more as a "local calibration" task than a global vision task.
+* **Feature Dimensionality**: The expansion to 3,870 features (including derivatives) required strict Feature Selection (SelectKBest) to maintain training efficiency on local hardware (i9-12900K).
+
+---
+
 ### Project Structure & Execution
 
 The primary models are strictly isolated:
@@ -134,13 +158,13 @@ The primary models are strictly isolated:
 /PropertySpecificEnsemble   # Architecture 2: Decoupled Trace-Metal Ensemble
 /March20_Ensemble           # Architecture 3: RFE + 200Epoch CNN Stack
 /Hyperview_R2_085           # Architecture 4: SSL Encoders + LightGBM Decoupling
+/SoilSpectraNet             # Architecture 5: Feature-Driven Recovery Pipeline
 ```
 
-**Running the Pipeline:**
+**Running the Recovery Pipeline:**
 ```bash
-# Assuming /data/raw/HYPERVIEW2/train is populated
-cd Hyperkon+MLensemble
-python src/train.py
-python src/train_phase2.py
-python evaluate.py
+cd SoilSpectraNet/RecoveryPipeline
+python phase_a_recovery.py           # Signal Recovery & CNN extraction
+python phase_b_local.py              # Parallel Local KNN Modeling
+python final_integrated_pipeline.py  # Final Blended Calibration
 ```
