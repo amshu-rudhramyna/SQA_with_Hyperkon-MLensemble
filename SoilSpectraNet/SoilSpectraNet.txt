@@ -1,0 +1,386 @@
+OBJECTIVE:
+Upgrade HyperKon + ML ensemble pipeline to achieve R² > 0.85 on Hyperview dataset.
+
+------------------------------------------------------------
+MISSING COMPONENT 1 — MULTI-MODAL FUSION (HSI + MSI + PRISMA)
+------------------------------------------------------------
+
+Problem:
+Current pipeline compresses all data into 1 spectral vector → loses modality information.
+
+Research insight:
+Multi-sensor fusion improves representation learning and reconstruction quality in hyperspectral tasks. :contentReference[oaicite:0]{index=0}
+
+Approach 1 — Late Fusion (Easiest)
+- Train separate encoders:
+    HSI_encoder
+    MSI_encoder
+- Concatenate features:
+    X = concat(hsi_feat, msi_feat)
+- Feed to ensemble
+
+Expected gain: +0.05 to +0.10 R²
+
+------------------------------------------------------------
+
+Approach 2 — Cross-Attention Fusion (Better)
+
+- Use transformer:
+    HSI features = queries
+    MSI features = keys/values
+
+Example:
+    fused = Attention(Q=hsi, K=msi, V=msi)
+
+- Allows learning relationships between sensors
+
+Expected gain: +0.10 to +0.15
+
+------------------------------------------------------------
+
+Approach 3 — Physics-Guided Fusion (SOTA)
+
+- Use spectral unmixing idea:
+    HSI → spectral signatures
+    MSI → spatial distribution
+
+- Learn abundance maps + reconstruction
+
+Expected gain: +0.15+
+
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+MISSING COMPONENT 2 — SELF-SUPERVISED PRETRAINING
+------------------------------------------------------------
+
+Problem:
+Model trained from scratch on ~1800 samples → weak features
+
+Research:
+Self-supervised learning improves hyperspectral representation in low-label regimes :contentReference[oaicite:1]{index=1}  
+
+Approach 1 — Contrastive Learning (Standard)
+
+- Augment spectra:
+    noise, band masking, spectral shift
+- Train encoder to match same-sample augmentations
+
+Loss:
+    contrastive_loss(z1, z2)
+
+Expected gain: +0.10 to +0.20
+
+------------------------------------------------------------
+
+Approach 2 — Spectral Order Prediction (NEW SOTA)
+
+- Shuffle spectral bands
+- Train model to recover order
+
+From SpecBPP:
+- Achieved R² = 0.94+ in soil tasks :contentReference[oaicite:2]{index=2}  
+
+Expected gain: +0.20+
+
+------------------------------------------------------------
+
+Approach 3 — Masked Autoencoder (Transformer)
+
+- Mask 40–60% spectral bands
+- Train model to reconstruct
+
+Example:
+    input → masked → reconstruct
+
+Expected gain: +0.15+
+
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+MISSING COMPONENT 3 — SPATIAL INFORMATION LOSS
+------------------------------------------------------------
+
+Problem:
+You collapse field image → mean spectrum
+
+Dataset:
+Each sample is a spatial field (critical info lost)
+
+Approach 1 — Patch-based CNN
+
+- Divide image into patches
+- Extract features per patch
+- Aggregate (mean or attention)
+
+Expected gain: +0.10
+
+------------------------------------------------------------
+
+Approach 2 — 3D CNN (Spectral + Spatial)
+
+- Input shape:
+    (H, W, bands)
+- Apply 3D convolution
+
+Expected gain: +0.10 to +0.20
+
+------------------------------------------------------------
+
+Approach 3 — Spatial-Spectral Transformer
+
+- Treat image as sequence of patches
+- Learn long-range dependencies
+
+Research:
+Transformers improve spatial-spectral modeling efficiency :contentReference[oaicite:3]{index=3}  
+
+Expected gain: +0.15+
+
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+MISSING COMPONENT 4 — LOCAL SPECTRAL MODELING
+------------------------------------------------------------
+
+Problem:
+Global model ignores soil variability
+
+Research:
+Local models outperform global models (R² > 0.8) :contentReference[oaicite:4]{index=4}  
+
+Approach 1 — KNN-based Local Training
+
+- For each test sample:
+    select k nearest training samples
+    train local model
+
+Expected gain: +0.10
+
+------------------------------------------------------------
+
+Approach 2 — Clustering (KMeans)
+
+- Cluster dataset into soil groups
+- Train model per cluster
+
+Expected gain: +0.10 to +0.15
+
+------------------------------------------------------------
+
+Approach 3 — Spectral Similarity Filtering (BEST)
+
+- Use cosine similarity
+- Build local calibration dataset
+
+Expected gain: +0.15+
+
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+MISSING COMPONENT 5 — ENSEMBLE IS TOO SIMPLE
+------------------------------------------------------------
+
+Problem:
+Simple averaging → no learning between models
+
+Approach 1 — Stacking (Baseline Upgrade)
+
+- Base:
+    RF, XGB, SVR
+- Meta:
+    Ridge or LightGBM
+
+Expected gain: +0.05 to +0.10
+
+------------------------------------------------------------
+
+Approach 2 — Weighted Ensemble (Optimized)
+
+- Learn weights using optimization:
+    minimize validation RMSE
+
+Expected gain: +0.05
+
+------------------------------------------------------------
+
+Approach 3 — Meta-Learning Ensemble (BEST)
+
+- Use LightGBM as meta learner
+- Input = predictions of base models
+
+Expected gain: +0.10+
+
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+MISSING COMPONENT 6 — TARGET-SPECIFIC MODELING
+------------------------------------------------------------
+
+Problem:
+All soil properties treated equally
+
+Reality:
+Each element uses different spectral bands
+
+Approach 1 — Separate Models per Target
+
+- Train 6 independent models
+
+Expected gain: +0.05 to +0.10
+
+------------------------------------------------------------
+
+Approach 2 — Multi-head Neural Network
+
+- Shared encoder
+- Separate output heads
+
+Expected gain: +0.10
+
+------------------------------------------------------------
+
+Approach 3 — Feature Selection per Target
+
+- Different band subsets for each nutrient
+
+Expected gain: +0.10+
+
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+MISSING COMPONENT 7 — ADVANCED SPECTRAL PROCESSING
+------------------------------------------------------------
+
+Problem:
+Only Savitzky-Golay + derivatives used
+
+Research:
+Preprocessing critical due to noise and scatter :contentReference[oaicite:5]{index=5}  
+
+Approach 1 — SNV + MSC normalization
+
+- Remove scatter + baseline drift
+
+Expected gain: +0.05
+
+------------------------------------------------------------
+
+Approach 2 — Continuum Removal
+
+- Highlight absorption features
+
+Expected gain: +0.10
+
+------------------------------------------------------------
+
+Approach 3 — Band Selection via Optimization
+
+- GA / PSO / RFE
+
+Expected gain: +0.10+
+
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+MISSING COMPONENT 8 — DOMAIN ADAPTATION (CRITICAL)
+------------------------------------------------------------
+
+Problem:
+Train = airborne HSI
+Test = satellite HSI → domain shift
+
+Research:
+Transferability is a major challenge in soil HSI models :contentReference[oaicite:6]{index=6}  
+
+Approach 1 — Feature Alignment
+
+- Align distributions:
+    minimize distance between domains
+
+Expected gain: +0.10
+
+------------------------------------------------------------
+
+Approach 2 — Domain Adversarial Training
+
+- Add discriminator:
+    classify domain
+- Encoder learns domain-invariant features
+
+Expected gain: +0.10 to +0.15
+
+------------------------------------------------------------
+
+Approach 3 — Fine-tuning on Satellite Data
+
+- Pretrain on airborne
+- Fine-tune on PRISMA
+
+Expected gain: +0.15+
+
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+MISSING COMPONENT 9 — OVERCOMPLEX MODEL WITHOUT STRATEGY
+------------------------------------------------------------
+
+Problem:
+Model complexity > data capacity
+
+Approach 1 — Reduce model size
+
+- Smaller CNN / Transformer
+
+------------------------------------------------------------
+
+Approach 2 — Strong regularization
+
+- dropout
+- weight decay
+
+------------------------------------------------------------
+
+Approach 3 — Curriculum learning
+
+- train simple → increase complexity
+
+------------------------------------------------------------
+
+
+------------------------------------------------------------
+FINAL STRATEGY (COMBINED)
+------------------------------------------------------------
+
+To reach R² > 0.85:
+
+MANDATORY COMBINATION:
+
+1. Self-supervised pretraining
+2. Multi-modal fusion
+3. Spatial + spectral modeling
+4. Local modeling
+5. Stacking ensemble
+
+Expected result:
+R² = 0.80–0.90 achievable
+
+------------------------------------------------------------
+KEY INSIGHT
+------------------------------------------------------------
+
+Your current pipeline:
+"Good model + weak learning strategy"
+
+Required shift:
+"Strong data-driven learning system"
+
+------------------------------------------------------------

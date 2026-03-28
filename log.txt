@@ -1,0 +1,48 @@
+Fold 1 | B: 0.5418
+Fold 1 | Cu: 0.2412
+Fold 1 | Zn: 0.2854
+Fold 1 | Fe: 0.3798
+Fold 2 | B: 0.3853
+Fold 2 | Cu: 0.2834
+Fold 2 | Zn: 0.2234
+Fold 2 | Fe: 0.4134
+Fold 3 | B: 0.5194
+Fold 3 | Cu: 0.2455
+Fold 3 | Zn: 0.3524
+Fold 3 | Fe: 0.3981
+Fold 4 | B: 0.3967
+Fold 4 | Cu: 0.1547
+Fold 4 | Zn: 0.3136
+Fold 4 | Fe: 0.3034
+Fold 5 | B: 0.5304
+Fold 5 | Cu: 0.2135
+Fold 5 | Zn: 0.3427
+Fold 5 | Fe: 0.4084
+Fold 6 | B: 0.3971
+Fold 6 | Cu: 0.2022
+Fold 6 | Zn: 0.2665
+Fold 6 | Fe: 0.3232
+Fold 7 | B: 0.4106
+Fold 7 | Cu: 0.2519
+Fold 7 | Zn: 0.2978
+Fold 7 | Fe: 0.3792
+Fold 8 | B: 0.5324
+Fold 8 | Cu: 0.0567
+Fold 8 | Zn: 0.2573
+Fold 8 | Fe: 0.3575
+Fold 9 | B: 0.4673
+Fold 9 | Cu: 0.2229
+Fold 9 | Zn: 0.3596
+Fold 9 | Fe: 0.2907
+Fold 10 | B: 0.4693
+Fold 10 | Cu: 0.1730
+Fold 10 | Zn: 0.2605
+Fold 10 | Fe: 0.3228
+
+FINAL INTEGRATED SUCCESS REPORT
+Target   B: CALIBRATED R2 = 0.4650
+Target  Cu: CALIBRATED R2 = 0.2045
+Target  Zn: CALIBRATED R2 = 0.2959
+Target  Fe: CALIBRATED R2 = 0.3577
+
+OVERALL MODEL R2: 0.3308
