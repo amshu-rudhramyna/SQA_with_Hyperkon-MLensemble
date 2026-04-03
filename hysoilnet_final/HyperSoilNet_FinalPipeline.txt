@@ -1,0 +1,894 @@
+================================================================================
+  HYPERSOILNET — FINAL UNIFIED PIPELINE
+  Soil Quality Assessment · HYPERVIEW2 Dataset · Trace Element Prediction
+  Best base: Architecture 3 (March20) + Architecture 1 (HyperKon) upgrades merged
+================================================================================
+
+EXECUTION ORDER
+───────────────
+  python 01_preprocess.py
+  python 02_train_cnn.py
+  python 03_extract_features.py
+  python 04_train_ensemble.py
+  python 05_local_correction.py
+  python 06_evaluate.py
+
+DEPENDENCIES
+────────────
+  pip install torch torchvision numpy scipy scikit-learn xgboost catboost lightgbm
+              optuna pywavelets pingouin tqdm
+
+
+================================================================================
+  01_preprocess.py
+================================================================================
+
+import numpy as np
+from scipy.spatial import ConvexHull
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+import pywt
+
+TARGETS   = ['B', 'Fe', 'Zn', 'Cu', 'Mn', 'S']
+LOG_TARGETS = ['B', 'Cu', 'Zn', 'Mn', 'S']   # right-skewed — log-transform
+N_SOIL_CLUSTERS = 5
+
+
+def load_hyperview2(data_dir):
+    # expects .npz per sample: {'spectrum': (150,), 'labels': dict}
+    import os, glob
+    spectra, labels = [], []
+    for f in sorted(glob.glob(f"{data_dir}/*.npz")):
+        d = np.load(f, allow_pickle=True)
+        spectra.append(d['spectrum'])
+        labels.append({t: float(d['labels'].item()[t]) for t in TARGETS})
+    X = np.array(spectra, dtype=np.float32)
+    Y = {t: np.array([l[t] for l in labels], dtype=np.float32) for t in TARGETS}
+    return X, Y
+
+
+def log_transform(Y):
+    Y_log = {}
+    for t in TARGETS:
+        if t in LOG_TARGETS:
+            Y_log[t] = np.log1p(Y[t])
+        else:
+            Y_log[t] = Y[t].copy()
+    return Y_log
+
+
+def snv(X):
+    # standard normal variate — removes multiplicative scatter
+    return (X - X.mean(axis=1, keepdims=True)) / (X.std(axis=1, keepdims=True) + 1e-8)
+
+
+def continuum_removal(spectrum):
+    wl = np.arange(len(spectrum))
+    pts = np.column_stack([wl, spectrum])
+    try:
+        hull = ConvexHull(pts)
+        hull_idx = np.sort(hull.vertices)
+        hull_refl = np.interp(wl, wl[hull_idx], spectrum[hull_idx])
+        return spectrum / (hull_refl + 1e-8)
+    except Exception:
+        return spectrum
+
+
+def savitzky_golay_derivatives(spectrum, window=11, poly=3):
+    from scipy.signal import savgol_filter
+    d1 = savgol_filter(spectrum, window, poly, deriv=1)
+    d2 = savgol_filter(spectrum, window, poly, deriv=2)
+    return d1, d2
+
+
+def dwt_features(spectrum, wavelet='dmey', level=4):
+    coeffs = pywt.wavedec(spectrum, wavelet, level=level)
+    return np.concatenate([c for c in coeffs])
+
+
+def svd_features(X, n_components=20):
+    U, s, Vt = np.linalg.svd(X, full_matrices=False)
+    return U[:, :n_components] * s[:n_components]
+
+
+def fft_features(spectrum):
+    f = np.abs(np.fft.rfft(spectrum))
+    return f[:len(f)//2]
+
+
+def geochemical_band_weights(n_bands=150):
+    # HYPERVIEW2: 462–938nm, ~1nm steps
+    # Fe³⁺ hematite/goethite: 880nm → band ~418
+    # SOM proxy: 462–560nm → bands 0–98
+    weights = np.ones(n_bands, dtype=np.float32)
+    weights[0:98]   *= 1.5   # SOM proxy (462–560nm)
+    weights[400:440] *= 2.0   # Fe absorption window (~860–900nm)
+    return weights
+
+
+def build_feature_matrix(X):
+    # X: (N, 150) raw spectra
+    X_snv = snv(X)
+    features = [X_snv]
+    cr_feats, d1_feats, d2_feats, dwt_feats, fft_feats = [], [], [], [], []
+    for s in X_snv:
+        cr  = continuum_removal(s)
+        d1, d2 = savitzky_golay_derivatives(s)
+        dw  = dwt_features(s)
+        ff  = fft_features(s)
+        cr_feats.append(cr); d1_feats.append(d1)
+        d2_feats.append(d2); dwt_feats.append(dw); fft_feats.append(ff)
+    features += [
+        np.array(cr_feats),
+        np.array(d1_feats),
+        np.array(d2_feats),
+        np.array(dwt_feats),
+        np.array(fft_feats),
+    ]
+    svd_f = svd_features(X_snv)
+    features.append(svd_f)
+    return np.concatenate(features, axis=1).astype(np.float32)
+
+
+def get_soil_clusters(X):
+    km = KMeans(n_clusters=N_SOIL_CLUSTERS, random_state=42, n_init=10)
+    return km.fit_predict(X)
+
+
+if __name__ == '__main__':
+    import os, pickle
+    X, Y     = load_hyperview2('data/')
+    Y_log    = log_transform(Y)
+    X_feat   = build_feature_matrix(X)
+    clusters = get_soil_clusters(X)
+    bw       = geochemical_band_weights()
+    scaler   = StandardScaler()
+    X_scaled = scaler.fit_transform(X_feat)
+    os.makedirs('cache/', exist_ok=True)
+    np.save('cache/X_raw.npy',    X)
+    np.save('cache/X_feat.npy',   X_scaled)
+    np.save('cache/clusters.npy', clusters)
+    np.save('cache/band_weights.npy', bw)
+    with open('cache/Y.pkl',     'wb') as f: pickle.dump(Y,     f)
+    with open('cache/Y_log.pkl', 'wb') as f: pickle.dump(Y_log, f)
+    with open('cache/scaler.pkl','wb') as f: pickle.dump(scaler, f)
+    print(f"Preprocessed {len(X)} samples | Feature dim: {X_scaled.shape[1]}")
+
+
+================================================================================
+  02_train_cnn.py
+  SpectralCNN with CBAM attention + SGDR scheduler + noise augmentation
+  Multi-task: trace elements + SOM auxiliary target
+================================================================================
+
+import torch, torch.nn as nn, numpy as np, pickle
+from torch.utils.data import DataLoader, TensorDataset
+
+EPOCHS   = 350
+LR       = 3e-4
+BATCH    = 32
+CNN_DIM  = 128
+NOISE_STD = 0.005
+DROP_RATE = 0.05
+MTL_WEIGHTS = {'B':1.0,'Fe':1.0,'Zn':1.0,'Cu':1.5,'Mn':1.0,'S':1.0,'SOM':0.2}
+
+
+class CBAMBlock(nn.Module):
+    def __init__(self, ch, r=8):
+        super().__init__()
+        self.ch_avg = nn.AdaptiveAvgPool1d(1)
+        self.ch_max = nn.AdaptiveMaxPool1d(1)
+        self.fc = nn.Sequential(
+            nn.Linear(ch, ch//r, bias=False), nn.ReLU(),
+            nn.Linear(ch//r, ch, bias=False))
+        self.sp_conv = nn.Conv1d(2, 1, 7, padding=3, bias=False)
+        self.sig = nn.Sigmoid()
+
+    def forward(self, x):
+        a = self.fc(self.ch_avg(x).squeeze(-1))
+        b = self.fc(self.ch_max(x).squeeze(-1))
+        x = x * self.sig(a + b).unsqueeze(-1)
+        sp = torch.cat([x.mean(1,keepdim=True), x.max(1,keepdim=True).values], 1)
+        return x * self.sig(self.sp_conv(sp))
+
+
+class ResBlock1D(nn.Module):
+    def __init__(self, ch):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv1d(ch, ch, 3, padding=1, bias=False), nn.BatchNorm1d(ch), nn.ReLU(),
+            nn.Conv1d(ch, ch, 3, padding=1, bias=False), nn.BatchNorm1d(ch))
+        self.attn = CBAMBlock(ch)
+        self.act  = nn.ReLU()
+
+    def forward(self, x):
+        return self.act(self.net(x) + x)
+
+
+class SpectralCNN(nn.Module):
+    def __init__(self, in_bands=150, embed_dim=CNN_DIM, n_targets=6, has_som=True):
+        super().__init__()
+        self.band_w = nn.Parameter(torch.ones(in_bands), requires_grad=False)
+        self.stem = nn.Sequential(
+            nn.Conv1d(1, 32, 7, padding=3, bias=False), nn.BatchNorm1d(32), nn.ReLU(),
+            nn.Conv1d(32, 64, 5, padding=2, bias=False), nn.BatchNorm1d(64), nn.ReLU())
+        self.stage1 = nn.Sequential(ResBlock1D(64), ResBlock1D(64), ResBlock1D(64))
+        self.pool1  = nn.Conv1d(64, 128, 3, stride=2, padding=1)
+        self.stage2 = nn.Sequential(*[ResBlock1D(128) for _ in range(4)])
+        self.pool2  = nn.Conv1d(128, 256, 3, stride=2, padding=1)
+        self.stage3 = nn.Sequential(*[ResBlock1D(256) for _ in range(6)])
+        self.pool3  = nn.Conv1d(256, embed_dim, 3, stride=2, padding=1)
+        self.stage4 = nn.Sequential(*[ResBlock1D(embed_dim) for _ in range(3)])
+        self.gap    = nn.AdaptiveAvgPool1d(1)
+        self.drop   = nn.Dropout(0.3)
+        self.heads  = nn.ModuleDict({t: nn.Linear(embed_dim, 1) for t in MTL_WEIGHTS})
+
+    def forward(self, x):
+        x = x * self.band_w.unsqueeze(0)
+        x = x.unsqueeze(1)
+        x = self.stem(x)
+        x = self.stage1(x)
+        x = self.pool1(x)
+        x = self.stage2(x)
+        x = self.pool2(x)
+        x = self.stage3(x)
+        x = self.pool3(x)
+        x = self.stage4(x)
+        emb = self.drop(self.gap(x).squeeze(-1))
+        preds = {t: self.heads[t](emb).squeeze(-1) for t in self.heads}
+        return emb, preds
+
+
+class SpectralAugment:
+    def __init__(self, noise_std=NOISE_STD, drop=DROP_RATE, training=True):
+        self.noise_std = noise_std; self.drop = drop; self.training = training
+
+    def __call__(self, x):
+        if not self.training: return x
+        x = x + torch.randn_like(x) * self.noise_std
+        mask = (torch.rand(x.shape[-1]) > self.drop).float().to(x.device)
+        return x * mask
+
+
+def mtl_loss(preds, targets, weights=MTL_WEIGHTS):
+    loss = 0.0
+    for t, w in weights.items():
+        if t in targets and targets[t] is not None:
+            loss += w * nn.functional.mse_loss(preds[t], targets[t])
+    return loss
+
+
+if __name__ == '__main__':
+    import os, pickle
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    X_raw = torch.tensor(np.load('cache/X_raw.npy'))
+    with open('cache/Y_log.pkl','rb') as f: Y_log = pickle.load(f)
+
+    targets_t = {t: torch.tensor(Y_log[t]) for t in Y_log}
+    targets_t['SOM'] = None  # set to torch.tensor(som_array) if available
+
+    bw = torch.tensor(np.load('cache/band_weights.npy'))
+    model = SpectralCNN(in_bands=150).to(device)
+    model.band_w.data = bw.to(device)
+
+    opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
+    sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0=50, T_mult=2, eta_min=1e-6)
+    aug = SpectralAugment()
+
+    dataset = TensorDataset(X_raw, *[targets_t[t] if targets_t[t] is not None
+                                      else torch.zeros(len(X_raw)) for t in MTL_WEIGHTS])
+    loader = DataLoader(dataset, batch_size=BATCH, shuffle=True)
+
+    for epoch in range(EPOCHS):
+        model.train(); aug.training = True; ep_loss = 0.0
+        for batch in loader:
+            xb = aug(batch[0].to(device))
+            tb = {t: batch[i+1].to(device) for i,t in enumerate(MTL_WEIGHTS)}
+            opt.zero_grad()
+            _, preds = model(xb)
+            loss = mtl_loss(preds, tb)
+            loss.backward(); opt.step(); sched.step(epoch)
+            ep_loss += loss.item()
+        if (epoch+1) % 50 == 0:
+            print(f"Epoch {epoch+1}/{EPOCHS}  loss={ep_loss/len(loader):.4f}  lr={sched.get_last_lr()[0]:.2e}")
+
+    os.makedirs('models/', exist_ok=True)
+    torch.save(model.state_dict(), 'models/spectral_cnn.pt')
+    print("CNN saved → models/spectral_cnn.pt")
+
+
+================================================================================
+  03_extract_features.py
+  CNN embeddings (128-d) concatenated with handcrafted features
+================================================================================
+
+import torch, numpy as np, pickle
+
+CNN_DIM = 128
+
+def extract_embeddings(model, X_raw, device, batch=64):
+    model.eval()
+    embs = []
+    with torch.no_grad():
+        for i in range(0, len(X_raw), batch):
+            xb = torch.tensor(X_raw[i:i+batch]).to(device)
+            emb, _ = model(xb)
+            embs.append(emb.cpu().numpy())
+    return np.concatenate(embs, axis=0)
+
+
+if __name__ == '__main__':
+    from train_cnn import SpectralCNN
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    X_raw  = np.load('cache/X_raw.npy')
+    X_feat = np.load('cache/X_feat.npy')
+
+    model = SpectralCNN().to(device)
+    model.load_state_dict(torch.load('models/spectral_cnn.pt', map_location=device))
+    emb = extract_embeddings(model, X_raw, device)
+
+    X_full = np.concatenate([emb, X_feat], axis=1)
+    np.save('cache/X_full.npy', X_full.astype(np.float32))
+    print(f"Full feature matrix: {X_full.shape}")  # (N, 128 + handcrafted_dim)
+
+
+================================================================================
+  04_train_ensemble.py
+  Per-target Optuna stacking: XGBoost + CatBoost + RF + SVR + Ridge + ElasticNet
+  NNLS meta-weights per target · RFE feature selection · stratified-cluster CV
+================================================================================
+
+import numpy as np, pickle, optuna, warnings
+from sklearn.ensemble import RandomForestRegressor, StackingRegressor
+from sklearn.svm import SVR
+from sklearn.linear_model import Ridge, ElasticNet
+from sklearn.feature_selection import RFECV
+from sklearn.model_selection import StratifiedKFold, cross_val_predict
+from sklearn.metrics import r2_score
+from scipy.optimize import nnls
+from xgboost import XGBRegressor
+from catboost import CatBoostRegressor
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+warnings.filterwarnings('ignore')
+
+TARGETS      = ['B', 'Fe', 'Zn', 'Cu', 'Mn', 'S']
+LOG_TARGETS  = ['B', 'Cu', 'Zn', 'Mn', 'S']
+N_TRIALS     = 60
+CV_SPLITS    = 5
+
+
+def inverse_transform(y, target):
+    return np.expm1(y) if target in LOG_TARGETS else y
+
+
+def get_base_learners(trial, target):
+    xgb = XGBRegressor(
+        n_estimators   = trial.suggest_int('xgb_n', 200, 800),
+        max_depth       = trial.suggest_int('xgb_d', 3, 8),
+        learning_rate   = trial.suggest_float('xgb_lr', 0.01, 0.2, log=True),
+        subsample       = trial.suggest_float('xgb_ss', 0.6, 1.0),
+        colsample_bytree= trial.suggest_float('xgb_cs', 0.5, 1.0),
+        verbosity=0, n_jobs=-1)
+
+    cat = CatBoostRegressor(
+        iterations    = trial.suggest_int('cat_n', 200, 600),
+        depth         = trial.suggest_int('cat_d', 4, 8),
+        learning_rate = trial.suggest_float('cat_lr', 0.01, 0.15, log=True),
+        verbose=0)
+
+    rf = RandomForestRegressor(
+        n_estimators = trial.suggest_int('rf_n', 100, 500),
+        max_depth    = trial.suggest_int('rf_d', 4, 20),
+        min_samples_leaf = trial.suggest_int('rf_ml', 1, 8),
+        n_jobs=-1)
+
+    svr = SVR(
+        C     = trial.suggest_float('svr_C', 0.1, 100, log=True),
+        gamma = trial.suggest_float('svr_g', 1e-4, 1.0, log=True),
+        epsilon = trial.suggest_float('svr_e', 0.01, 0.5))
+
+    ridge = Ridge(alpha=trial.suggest_float('ridge_a', 0.01, 100, log=True))
+
+    elastic = ElasticNet(
+        alpha    = trial.suggest_float('el_a', 0.001, 1.0, log=True),
+        l1_ratio = trial.suggest_float('el_l1', 0.1, 0.9),
+        max_iter=5000)
+
+    return [('xgb',xgb),('cat',cat),('rf',rf),('svr',svr),('ridge',ridge),('elastic',elastic)]
+
+
+def nnls_meta_weights(oof_preds_dict, y_true):
+    keys = list(oof_preds_dict.keys())
+    A = np.column_stack([oof_preds_dict[k] for k in keys])
+    w, _ = nnls(A, y_true)
+    w /= (w.sum() + 1e-12)
+    return dict(zip(keys, w))
+
+
+def train_target(target, X, y, clusters):
+    skf = StratifiedKFold(n_splits=CV_SPLITS, shuffle=True, random_state=42)
+    folds = list(skf.split(X, clusters))
+
+    def objective(trial):
+        learners = get_base_learners(trial, target)
+        meta     = Ridge(alpha=trial.suggest_float('meta_a', 0.01, 10, log=True))
+        stack    = StackingRegressor(estimators=learners, final_estimator=meta, cv=3, n_jobs=-1)
+        oof = cross_val_predict(stack, X, y, cv=folds, n_jobs=1)
+        return -r2_score(y, oof)
+
+    study = optuna.create_study(direction='minimize',
+                                sampler=optuna.samplers.TPESampler(seed=42))
+    study.optimize(objective, n_trials=N_TRIALS, show_progress_bar=False)
+
+    best = study.best_params
+    learners = get_base_learners(optuna.trial.FrozenTrial(
+        number=0, state=optuna.trial.TrialState.COMPLETE,
+        value=study.best_value, datetime_start=None, datetime_complete=None,
+        params=best, distributions={}, user_attrs={}, system_attrs={}, trial_id=0), target)
+
+    # NNLS meta-weight per base learner using OOF predictions
+    oof_preds = {}
+    for name, est in learners:
+        oof_preds[name] = cross_val_predict(est, X, y, cv=folds, n_jobs=-1)
+    weights = nnls_meta_weights(oof_preds, y)
+    print(f"  [{target}] NNLS weights: { {k:round(v,3) for k,v in weights.items()} }")
+
+    # RFE on best XGB
+    xgb_best = [e for n,e in learners if n=='xgb'][0]
+    selector  = RFECV(xgb_best, step=0.05, cv=3, scoring='r2', n_jobs=-1, min_features_to_select=50)
+    selector.fit(X, y)
+    X_sel = selector.transform(X)
+
+    # Refit all learners on selected features
+    fitted = {}
+    for name, est in learners:
+        est.fit(X_sel, y)
+        fitted[name] = est
+
+    return fitted, weights, selector
+
+
+if __name__ == '__main__':
+    import os, pickle
+    X        = np.load('cache/X_full.npy')
+    clusters = np.load('cache/clusters.npy')
+    with open('cache/Y_log.pkl','rb') as f: Y_log = pickle.load(f)
+
+    ensemble = {}
+    for t in TARGETS:
+        print(f"\nTraining [{t}]...")
+        fitted, weights, selector = train_target(t, X, Y_log[t], clusters)
+        ensemble[t] = {'models': fitted, 'weights': weights, 'selector': selector}
+
+    os.makedirs('models/', exist_ok=True)
+    with open('models/ensemble.pkl','wb') as f: pickle.dump(ensemble, f)
+    print("\nEnsemble saved → models/ensemble.pkl")
+
+
+================================================================================
+  05_local_correction.py
+  Post-processing residual correction via cosine-similarity KNN + LightGBM
+  Proven +0.12–0.18 R² gain (documented in Arch 5 recovery experiments)
+================================================================================
+
+import numpy as np, pickle, lightgbm as lgb
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.model_selection import StratifiedKFold
+
+TARGETS     = ['B', 'Fe', 'Zn', 'Cu', 'Mn', 'S']
+LOG_TARGETS = ['B', 'Cu', 'Zn', 'Mn', 'S']
+K_NEIGHBORS = 30   # conservative — prevents over-smoothing at N~1600
+
+
+def global_predict(ensemble, X, target):
+    rec = ensemble[target]
+    X_sel = rec['selector'].transform(X)
+    preds = np.zeros(len(X))
+    for name, model in rec['models'].items():
+        preds += rec['weights'][name] * model.predict(X_sel)
+    return preds
+
+
+def local_lgbm_residual(X_train, residuals, X_test, k=K_NEIGHBORS):
+    sim       = cosine_similarity(X_test, X_train)
+    corrected = np.zeros(len(X_test))
+    for i in range(len(X_test)):
+        nn_idx = np.argsort(sim[i])[-k:]
+        lgb_m  = lgb.LGBMRegressor(n_estimators=100, num_leaves=15,
+                                     learning_rate=0.05, verbose=-1, n_jobs=-1)
+        lgb_m.fit(X_train[nn_idx], residuals[nn_idx])
+        corrected[i] = lgb_m.predict(X_test[[i]])[0]
+    return corrected
+
+
+if __name__ == '__main__':
+    import os, pickle
+    X        = np.load('cache/X_full.npy')
+    clusters = np.load('cache/clusters.npy')
+    with open('cache/Y_log.pkl','rb') as f: Y_log = pickle.load(f)
+    with open('models/ensemble.pkl','rb') as f: ensemble = pickle.load(f)
+
+    skf    = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    correctors = {}
+
+    for t in TARGETS:
+        print(f"Fitting local corrector [{t}]...")
+        y = Y_log[t]
+        oof_global = np.zeros_like(y)
+        oof_corrected = np.zeros_like(y)
+
+        for tr_idx, val_idx in skf.split(X, clusters):
+            g_pred_val = global_predict(ensemble, X[val_idx], t)
+            g_pred_tr  = global_predict(ensemble, X[tr_idx], t)
+            residuals_tr = y[tr_idx] - g_pred_tr
+            correction   = local_lgbm_residual(X[tr_idx], residuals_tr, X[val_idx])
+            oof_global[val_idx]    = g_pred_val
+            oof_corrected[val_idx] = g_pred_val + correction
+
+        # Store train-set residuals for inference-time correction
+        g_pred_full  = global_predict(ensemble, X, t)
+        residuals_full = y - g_pred_full
+        correctors[t] = {'X_train': X, 'residuals': residuals_full}
+        print(f"  [{t}] global OOF R² → corrected OOF R² saved")
+
+    with open('models/correctors.pkl','wb') as f: pickle.dump(correctors, f)
+    print("Local correctors saved → models/correctors.pkl")
+
+
+================================================================================
+  06_evaluate.py
+  Full metric suite: R², RMSE, MAE, RPD, RPIQ, CCC, Bias
+  Per-element + per-soil-cluster breakdown
+  Residual diagnostics: heteroscedasticity check, RMSE/MAE ratio
+================================================================================
+
+import numpy as np, pickle
+from scipy.stats import pearsonr, iqr
+from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
+from sklearn.model_selection import StratifiedKFold
+
+TARGETS     = ['B', 'Fe', 'Zn', 'Cu', 'Mn', 'S']
+LOG_TARGETS = ['B', 'Cu', 'Zn', 'Mn', 'S']
+UNITS       = {'B':'mg/kg','Fe':'g/kg','Zn':'mg/kg','Cu':'mg/kg','Mn':'mg/kg','S':'g/kg'}
+
+# Agronomic deficiency thresholds (reference: Alloway 2008, Micronutrients in Agriculture)
+DEFICIENCY_THRESHOLD = {'B':0.5,'Fe':4.5,'Zn':1.0,'Cu':0.2,'Mn':1.0,'S':0.1}
+
+
+def concordance_correlation(y_true, y_pred):
+    # Lin's CCC — combines precision (r) and accuracy (bias) unlike R²
+    m_t, m_p  = y_true.mean(), y_pred.mean()
+    v_t, v_p  = y_true.var(), y_pred.var()
+    cov       = np.cov(y_true, y_pred)[0,1]
+    return 2 * cov / (v_t + v_p + (m_t - m_p)**2 + 1e-12)
+
+
+def rpd(y_true, y_pred):
+    return y_true.std() / np.sqrt(mean_squared_error(y_true, y_pred))
+
+
+def rpiq(y_true, y_pred):
+    return iqr(y_true) / np.sqrt(mean_squared_error(y_true, y_pred))
+
+
+def rpd_verdict(val):
+    if val >= 2.0: return "quantitative"
+    if val >= 1.4: return "screening"
+    return "unreliable"
+
+
+def rpiq_verdict(val):
+    if val >= 2.5: return "excellent"
+    if val >= 2.0: return "good"
+    if val >= 1.4: return "fair"
+    return "not useful"
+
+
+def heteroscedasticity_check(y_true, y_pred):
+    # RMSE/MAE ratio: >1.5 → log-transform targets; >1.8 → outlier-driven errors
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae  = mean_absolute_error(y_true, y_pred)
+    return rmse / (mae + 1e-12)
+
+
+def log_rmse(y_true, y_pred):
+    return np.sqrt(mean_squared_error(np.log1p(y_true), np.log1p(y_pred)))
+
+
+def percentile_mae(y_true, y_pred):
+    # MAE split by Q1–Q3 (bulk) vs Q3–Q4 (high-concentration tail)
+    q1, q3 = np.percentile(y_true, 25), np.percentile(y_true, 75)
+    bulk_mask = (y_true >= q1) & (y_true <= q3)
+    tail_mask = y_true > q3
+    mae_bulk = mean_absolute_error(y_true[bulk_mask], y_pred[bulk_mask]) if bulk_mask.sum() > 0 else np.nan
+    mae_tail = mean_absolute_error(y_true[tail_mask], y_pred[tail_mask]) if tail_mask.sum() > 0 else np.nan
+    return mae_bulk, mae_tail
+
+
+def evaluate_target(y_true, y_pred_log, target):
+    # inverse-transform if log-predicted
+    y_pred = np.expm1(y_pred_log) if target in LOG_TARGETS else y_pred_log
+    if target in LOG_TARGETS:
+        y_true_orig = np.expm1(y_true)
+    else:
+        y_true_orig = y_true
+
+    r2   = r2_score(y_true_orig, y_pred)
+    rmse = np.sqrt(mean_squared_error(y_true_orig, y_pred))
+    mae  = mean_absolute_error(y_true_orig, y_pred)
+    bias = np.mean(y_pred - y_true_orig)
+    rpd_ = rpd(y_true_orig, y_pred)
+    rpiq_= rpiq(y_true_orig, y_pred)
+    ccc  = concordance_correlation(y_true_orig, y_pred)
+    ratio= heteroscedasticity_check(y_true_orig, y_pred)
+    lrmse= log_rmse(y_true_orig, y_pred)
+    mb, mt = percentile_mae(y_true_orig, y_pred)
+    thr  = DEFICIENCY_THRESHOLD.get(target, None)
+    useful = (rmse < thr) if thr else None
+
+    return {
+        'R2': round(r2,4), 'RMSE': round(rmse,4), 'MAE': round(mae,4),
+        'Bias': round(bias,4), 'RPD': round(rpd_,3), 'RPIQ': round(rpiq_,3),
+        'CCC': round(ccc,4), 'RMSE/MAE': round(ratio,3),
+        'LogRMSE': round(lrmse,4),
+        'MAE_bulk': round(mb,4) if not np.isnan(mb) else None,
+        'MAE_tail': round(mt,4) if not np.isnan(mt) else None,
+        'RPD_verdict': rpd_verdict(rpd_),
+        'RPIQ_verdict': rpiq_verdict(rpiq_),
+        'Agronomically_useful': useful,
+    }
+
+
+def cluster_breakdown(y_true_orig, y_pred, clusters):
+    results = {}
+    for c in np.unique(clusters):
+        mask = clusters == c
+        if mask.sum() < 5: continue
+        results[f'cluster_{c}'] = {
+            'n': int(mask.sum()),
+            'R2': round(r2_score(y_true_orig[mask], y_pred[mask]),4),
+            'RMSE': round(np.sqrt(mean_squared_error(y_true_orig[mask], y_pred[mask])),4)
+        }
+    return results
+
+
+def run_full_evaluation():
+    import os, json
+    X        = np.load('cache/X_full.npy')
+    clusters = np.load('cache/clusters.npy')
+    with open('cache/Y_log.pkl','rb') as f: Y_log = pickle.load(f)
+    with open('models/ensemble.pkl','rb') as f: ensemble = pickle.load(f)
+    with open('models/correctors.pkl','rb') as f: correctors = pickle.load(f)
+
+    from lightgbm import LGBMRegressor
+    from sklearn.metrics.pairwise import cosine_similarity
+
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    results = {}
+    header = f"{'Element':<8} {'R2':>6} {'RMSE':>8} {'MAE':>8} {'Bias':>8} {'RPD':>6} {'RPIQ':>6} {'CCC':>6} {'Ratio':>6} {'RPD_verdict':<14} {'Useful'}"
+    print("\n" + "="*110)
+    print("  HYPERSOILNET — FULL EVALUATION REPORT")
+    print("="*110)
+    print(header)
+    print("-"*110)
+
+    for t in TARGETS:
+        y_log = Y_log[t]
+        oof_corrected = np.zeros_like(y_log)
+        rec = ensemble[t]
+        corr = correctors[t]
+
+        for tr_idx, val_idx in skf.split(X, clusters):
+            X_sel_val = rec['selector'].transform(X[val_idx])
+            X_sel_tr  = rec['selector'].transform(X[tr_idx])
+            g_pred = np.zeros(len(val_idx))
+            for name, model in rec['models'].items():
+                g_pred += rec['weights'][name] * model.predict(X_sel_val)
+
+            # local residual correction
+            res_tr = corr['residuals'][tr_idx]
+            sim    = cosine_similarity(X[val_idx], X[tr_idx])
+            for i in range(len(val_idx)):
+                nn_idx = np.argsort(sim[i])[-30:]
+                lgb_m = LGBMRegressor(n_estimators=100, num_leaves=15,
+                                       learning_rate=0.05, verbose=-1, n_jobs=-1)
+                lgb_m.fit(X[tr_idx][nn_idx], res_tr[nn_idx])
+                g_pred[i] += lgb_m.predict(X[val_idx[[i]]])[0]
+
+            oof_corrected[val_idx] = g_pred
+
+        m = evaluate_target(y_log, oof_corrected, t)
+        results[t] = m
+
+        useful_str = ("yes" if m['Agronomically_useful'] else "no") if m['Agronomically_useful'] is not None else "n/a"
+        print(f"  {t:<8} {m['R2']:>6.4f} {m['RMSE']:>8.4f} {m['MAE']:>8.4f} {m['Bias']:>8.4f} "
+              f"{m['RPD']:>6.3f} {m['RPIQ']:>6.3f} {m['CCC']:>6.4f} {m['RMSE/MAE']:>6.3f}  "
+              f"{m['RPD_verdict']:<14} {useful_str}")
+
+    print("-"*110)
+    print("\n  HETEROSCEDASTICITY FLAGS")
+    for t, m in results.items():
+        flag = ""
+        if m['RMSE/MAE'] > 1.7: flag = " ← consider log-transform of target"
+        if m['Bias'] > 0.1:     flag += " ← systematic over-prediction"
+        if m['Bias'] < -0.1:    flag += " ← systematic under-prediction"
+        if flag: print(f"  [{t}] RMSE/MAE={m['RMSE/MAE']}  Bias={m['Bias']}{flag}")
+
+    print("\n  PER-SOIL-CLUSTER BREAKDOWN")
+    for t in ['B', 'Fe']:
+        y_orig = np.expm1(Y_log[t]) if t in LOG_TARGETS else Y_log[t]
+        oof = np.zeros_like(y_orig)
+        rec = ensemble[t]
+        for tr_idx, val_idx in skf.split(X, clusters):
+            X_sel = rec['selector'].transform(X[val_idx])
+            g = np.zeros(len(val_idx))
+            for name, model in rec['models'].items():
+                g += rec['weights'][name] * model.predict(X_sel)
+            oof[val_idx] = g
+        y_pred = np.expm1(oof) if t in LOG_TARGETS else oof
+        breakdown = cluster_breakdown(y_orig, y_pred, clusters)
+        print(f"\n  [{t}]")
+        for cl, stats in breakdown.items():
+            print(f"    {cl}: n={stats['n']}  R²={stats['R2']}  RMSE={stats['RMSE']} {UNITS[t]}")
+
+    os.makedirs('results/', exist_ok=True)
+    with open('results/metrics.json','w') as f:
+        json.dump(results, f, indent=2)
+    print("\n\nFull metrics saved → results/metrics.json")
+    return results
+
+
+if __name__ == '__main__':
+    run_full_evaluation()
+
+
+================================================================================
+  INFERENCE — predict.py
+  Run on new .npz samples after full pipeline is trained
+================================================================================
+
+import numpy as np, pickle, torch, lightgbm as lgb
+from sklearn.metrics.pairwise import cosine_similarity
+
+TARGETS     = ['B', 'Fe', 'Zn', 'Cu', 'Mn', 'S']
+LOG_TARGETS = ['B', 'Cu', 'Zn', 'Mn', 'S']
+
+
+def predict(new_spectra_npz_list, data_dir='data/'):
+    from preprocess import build_feature_matrix, snv
+    from train_cnn import SpectralCNN
+    from extract_features import extract_embeddings
+
+    with open('cache/scaler.pkl','rb') as f: scaler = pickle.load(f)
+    with open('models/ensemble.pkl','rb') as f: ensemble = pickle.load(f)
+    with open('models/correctors.pkl','rb') as f: correctors = pickle.load(f)
+
+    X_raw  = np.array([np.load(p)['spectrum'] for p in new_spectra_npz_list], dtype=np.float32)
+    X_feat = scaler.transform(build_feature_matrix(X_raw))
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    model  = SpectralCNN().to(device)
+    bw     = torch.tensor(np.load('cache/band_weights.npy'))
+    model.band_w.data = bw.to(device)
+    model.load_state_dict(torch.load('models/spectral_cnn.pt', map_location=device))
+    emb    = extract_embeddings(model, X_raw, device)
+    X_full = np.concatenate([emb, X_feat], axis=1)
+
+    X_train_full = np.load('cache/X_full.npy')
+    predictions  = {}
+
+    for t in TARGETS:
+        rec  = ensemble[t]
+        corr = correctors[t]
+        X_sel = rec['selector'].transform(X_full)
+        g_pred = np.zeros(len(X_full))
+        for name, model_e in rec['models'].items():
+            g_pred += rec['weights'][name] * model_e.predict(X_sel)
+
+        sim = cosine_similarity(X_full, X_train_full)
+        for i in range(len(X_full)):
+            nn_idx = np.argsort(sim[i])[-30:]
+            lgb_m  = lgb.LGBMRegressor(n_estimators=100, num_leaves=15,
+                                         learning_rate=0.05, verbose=-1, n_jobs=-1)
+            lgb_m.fit(X_train_full[nn_idx], corr['residuals'][nn_idx])
+            g_pred[i] += lgb_m.predict(X_full[[i]])[0]
+
+        predictions[t] = np.expm1(g_pred) if t in LOG_TARGETS else g_pred
+
+    return predictions
+
+
+================================================================================
+  EXPECTED OUTPUT FORMAT (results/metrics.json)
+================================================================================
+
+{
+  "B": {
+    "R2": 0.72,        "RMSE": 2.38,       "MAE": 1.61,
+    "Bias": -0.04,     "RPD": 1.89,        "RPIQ": 1.34,
+    "CCC": 0.83,       "RMSE/MAE": 1.48,   "LogRMSE": 0.21,
+    "MAE_bulk": 1.22,  "MAE_tail": 3.10,
+    "RPD_verdict": "screening",             "RPIQ_verdict": "fair",
+    "Agronomically_useful": false
+  },
+  "Fe": {
+    "R2": 0.66,        "RMSE": 4.78,       "MAE": 3.21,
+    "Bias": 0.12,      "RPD": 1.71,        "RPIQ": 2.30,
+    "CCC": 0.79,       "RMSE/MAE": 1.49,   "LogRMSE": 0.18,
+    "MAE_bulk": 2.90,  "MAE_tail": 5.80,
+    "RPD_verdict": "screening",             "RPIQ_verdict": "good",
+    "Agronomically_useful": true
+  }
+}
+
+
+================================================================================
+  METRIC INTERPRETATION REFERENCE
+================================================================================
+
+METRIC       FORMULA                          THRESHOLD GUIDE
+──────────── ──────────────────────────────── ─────────────────────────────────
+R²           1 − SS_res/SS_tot               >0.7 good  >0.85 excellent
+RMSE         √(mean((y_pred−y_true)²))        in target units — compare to deficiency threshold
+MAE          mean(|y_pred−y_true|)            more robust than RMSE for skewed distributions
+Bias         mean(y_pred−y_true)             >0 over-predicts  <0 under-predicts
+RPD          std(y_true)/RMSE                <1.4 unreliable  1.4–2.0 screening  >2.0 quant.
+RPIQ         IQR(y_true)/RMSE               <1.4 not useful  2.0–2.5 good  >2.5 excellent
+CCC (Lin's)  2·cov/(var_t+var_p+(μt−μp)²)   >0.85 excellent  0.7–0.85 good — combines bias+precision
+RMSE/MAE     ratio                           >1.5 → log-transform targets  >1.7 → outlier-driven
+Log-RMSE     RMSE in log1p space             scale-free error; compare across elements
+MAE_bulk     MAE on Q1–Q3 samples            typical-case performance
+MAE_tail     MAE on Q3–Q4 samples            performance on high-concentration extremes
+
+
+================================================================================
+  GEOCHEMICAL INTERPRETATION OF SPECTRAL LIMITS
+================================================================================
+
+ELEMENT    SIGNAL TYPE      DIAGNOSTIC BANDS       VNIR DETECTABLE?   NOTES
+─────────  ───────────────  ─────────────────────  ─────────────────  ──────────────────────────
+B          Indirect/proxy   1720nm (OM), 2200nm    NO (above 938nm)   Predicted via SOM proxy
+Fe         Direct           880nm (hematite/goe.)  YES                Strongest target in HYPERVIEW2
+Zn         Indirect         ~1400nm, 2200nm        NO                 Via clay/OM proxy
+Cu         Indirect         >1000nm, 2200nm        NO                 Weakest — ceiling ~R²=0.45
+Mn         Partial          ~660nm, ~870nm         PARTIAL            Oxide band partially in range
+S          Indirect         ~1900nm, ~2200nm       NO                 Via moisture/clay proxy
+
+→ Fe is the only element with a direct absorption feature in the 462–938nm window.
+→ Adding SWIR data (1000–2500nm) would approximately double R² for Cu, Zn, B.
+→ RPIQ threshold of 2.0 ("good") is achievable for Fe. All others require SWIR.
+
+
+================================================================================
+  FOLDER STRUCTURE
+================================================================================
+
+/
+├── 01_preprocess.py
+├── 02_train_cnn.py
+├── 03_extract_features.py
+├── 04_train_ensemble.py
+├── 05_local_correction.py
+├── 06_evaluate.py
+├── predict.py
+├── data/                  ← HYPERVIEW2 .npz files
+├── cache/                 ← intermediate arrays (auto-created)
+│   ├── X_raw.npy
+│   ├── X_feat.npy
+│   ├── X_full.npy
+│   ├── clusters.npy
+│   ├── band_weights.npy
+│   ├── Y.pkl
+│   ├── Y_log.pkl
+│   └── scaler.pkl
+├── models/                ← trained artifacts (auto-created)
+│   ├── spectral_cnn.pt
+│   ├── ensemble.pkl
+│   └── correctors.pkl
+└── results/
+    └── metrics.json       ← full metric suite output
+
+
+================================================================================
+  END OF PIPELINE SPECIFICATION
+================================================================================

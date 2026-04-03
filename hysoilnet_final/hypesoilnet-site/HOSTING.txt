@@ -1,0 +1,51 @@
+HYPERSOILNET WEBSITE — HOSTING GUIDE (VSCode)
+=============================================
+
+FILES IN THIS FOLDER
+---------------------
+  index.html   — main page
+  style.css    — all styling
+  script.js    — scroll animations
+
+OPTION 1 — LIVE SERVER (fastest, local only)
+--------------------------------------------
+  1. Open VSCode
+  2. Install extension: "Live Server" by Ritwick Dey
+     (Extensions sidebar → search "Live Server" → Install)
+  3. Right-click index.html in Explorer → "Open with Live Server"
+  4. Browser opens at http://127.0.0.1:5500
+  5. Any file save auto-reloads the page
+
+OPTION 2 — GITHUB PAGES (free, public URL)
+-------------------------------------------
+  1. Create a new repo on github.com (e.g. "hypersoilnet-report")
+  2. In VSCode terminal:
+       git init
+       git add .
+       git commit -m "initial site"
+       git branch -M main
+       git remote add origin https://github.com/YOUR_USER/hypersoilnet-report.git
+       git push -u origin main
+  3. On GitHub: Settings → Pages → Source: "Deploy from branch" → main / root
+  4. Site live at: https://YOUR_USER.github.io/hypersoilnet-report/
+
+OPTION 3 — NETLIFY DROP (zero config, instant)
+-----------------------------------------------
+  1. Go to https://app.netlify.com/drop
+  2. Drag the entire hypersoilnet-site/ folder onto the page
+  3. Get a public URL instantly (e.g. random-name.netlify.app)
+  4. To update: drag folder again or connect to GitHub repo
+
+OPTION 4 — VERCEL CLI (production grade)
+-----------------------------------------
+  1. Install: npm i -g vercel
+  2. In terminal inside this folder:
+       vercel
+  3. Follow prompts (free account, no config needed for static HTML)
+  4. Get https://hypersoilnet-site.vercel.app URL
+
+FONTS NOTE
+----------
+  The site loads Google Fonts (Fraunces, DM Sans, DM Mono).
+  Requires internet connection. For offline use, download fonts
+  via https://fonts.google.com and update @import in style.css.

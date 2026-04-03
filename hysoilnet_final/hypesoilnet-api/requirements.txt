@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-multipart
+numpy
+scipy
+torch
+scikit-learn
+xgboost
+catboost
+lightgbm
+pywavelets
